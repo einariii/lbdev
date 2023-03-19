@@ -1,0 +1,89 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - "*"
+
+env:
+  ELIXIR_VERSION: 1.14.3
+  OTP_VERSION: 25
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v3
+        id: mix-cache
+        with:
+          path: deps
+          key: ${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('**/mix.lock') }}
+
+      - run: |
+          mix local.rebar --force
+          mix local.hex --force
+          mix deps.get
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+
+      - run: mix test
+        if: success() || failure()
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v3
+        id: mix-cache
+        with:
+          path: deps
+          key: ${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-mix-${{ hashFiles('**/mix.lock') }}
+
+      - run: |
+          mix local.rebar --force
+          mix local.hex --force
+          mix deps.get
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+
+      - uses: actions/cache/restore@v3
+        id: plt-cache-restore
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-plt-${{ hashFiles('**/mix.lock') }}
+
+      - run: |
+          mkdir -p priv/plts
+          mix dialyzer --plt
+        if: steps.plt-cache-restore.outputs.cache-hit != 'true'
+
+      - uses: actions/cache/save@v3
+        id: plt-cache-save
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-plt-${{ hashFiles('**/mix.lock') }}
+        if: steps.plt-cache-restore.outputs.cache-hit != 'true'
+
+      - run: mix dialyzer
+        if: success() || failure()
+
+      - run: mix format --check-formatted
+        if: success() || failure()
+
+      - run: mix credo --strict
+        if: success() || failure()
